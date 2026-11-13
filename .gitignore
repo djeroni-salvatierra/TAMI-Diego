@@ -1,0 +1,8 @@
+
+# Research data, outputs, and local environment
+dataset/
+logs/
+results/
+venv/
+__pycache__/
+*.py[cod]
