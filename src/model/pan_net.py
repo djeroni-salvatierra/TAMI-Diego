@@ -11,7 +11,7 @@ class PanNet(nn.Module):
     Fuses upsampled Multi-Spectral (MS) and Panchromatic (PAN) images.
     """
 
-    def __init__(self, ms_channels: int = 4, features: int = 64, blocks: int = 4, kernel_size: int = 3):
+    def __init__(self, ms_channels: int = 3, features: int = 64, blocks: int = 4, kernel_size: int = 3):
         """Initializes PanNet for high-frequency residual pan-sharpening.
 
         Args:
@@ -22,6 +22,7 @@ class PanNet(nn.Module):
         """
         super(PanNet, self).__init__()
 
+        # Multi-spectral images + one panchromatic image
         in_channels = ms_channels + 1
         padding = kernel_size // 2
 

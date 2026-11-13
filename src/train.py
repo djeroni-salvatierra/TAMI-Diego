@@ -24,6 +24,7 @@ from src.model.sr_net import SRNet as LocalSRNet
 from src.model.sr_net_non_local import SRNet as NonLocalSRNet
 from src.utils.logger import Logger
 
+# Registry mapping --model CLI choices to task-specific network architectures
 SR_MODELS = {"local": LocalSRNet, "non_local": NonLocalSRNet}
 PAN_MODELS = {"local": PanNet, "non_local": PanNetNonLocal}
 
@@ -54,6 +55,7 @@ def train(args):
     is_pan = args.task == "pansharpen"
 
     # ── 1. Model ───────────────────────────────────────────────────────────
+    # Route to PanSharpenDataset (multi-band TIFFs) or DIV2KPanDataset (RGB PNGs)
     use_tiff_pan = is_pan and (
         args.pan_dataset == "tiff"
         or (args.pan_dataset == "auto" and _has_tiff_subfolders(args.dataset_path))
@@ -116,6 +118,8 @@ def train(args):
             sampling=args.sampling,
             patch_size=args.patch_size,
         )
+        # DIV2KPanDataset caches pre-extracted 4D patches in RAM like DIV2K;
+        # num_workers=0 + _fast_collate avoids multiprocessing IPC overhead
         loader_kwargs = dict(
             batch_size=args.batch_size,
             num_workers=0,
@@ -149,9 +153,11 @@ def train(args):
         val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
 
     # ── 3. Optimiser, AMP & Scheduler ──────────────────────────────────────
+    # L1 loss preserves sharper edges/high-frequency details than MSE in image restoration
     loss_fn = nn.L1Loss()
-    # Fused Adam runs all parameter updates in a single multi-tensor CUDA kernel
+    # Fused Adam runs all parameter updates in a single multi-tensor CUDA kernel, performance optimization
     optimizer = Adam(model.parameters(), lr=1e-3, fused=is_cuda)
+    # Cosine decay from initial lr (1e-3) down to eta_min (1e-6) over all epochs
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
 
     # RTX 3060 (Ampere) natively supports bfloat16 (no underflow/GradScaler overhead) as well as float16
@@ -166,10 +172,12 @@ def train(args):
     logger = Logger(dataset_label, model_label, args.nickname)
     logger.log_params(sum(p.numel() for p in model.parameters()))
 
+    # Fix one validation batch up front so visualisations compare the same images each epoch
     plot_batch = next(iter(val_loader))
     best_val_loss = float("inf")
     mem_fmt = torch.channels_last if is_cuda else torch.contiguous_format
 
+    # Guarantee TensorBoard/logger flush and cleanup even on early interruption
     try:
         for epoch in range(args.epochs):
             # ── Training ───────────────────────────────────────────────────
@@ -179,6 +187,7 @@ def train(args):
             pbar.set_postfix({"val_loss": f"{best_val_loss:.5f}"})
 
             for batch in pbar:
+                # Set .grad = None instead of zero-filling tensors to skip extra memory writes
                 optimizer.zero_grad(set_to_none=True)
 
                 if is_pan:

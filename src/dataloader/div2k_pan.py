@@ -89,12 +89,24 @@ class DIV2KPanDataset(Dataset):
         return [(self.lrms_up[i], self.pan[i], self.gt[i]) for i in indices]
 
     def _make_pan(self, gt: torch.Tensor) -> torch.Tensor:
-        # [N, 3, H, W] -> [N, 1, H, W]
+        # [N, 3, H, W] -> [N, 1, H, W] with the selected weights
         if self.pan_mode == "luma" and gt.size(1) == 3:
             return (gt * self._LUMA_WEIGHTS).sum(dim=1, keepdim=True)
         return gt.mean(dim=1, keepdim=True)
 
     def _process_single_image(self, img_path: str):
+        """
+        Processes a single image to create a Pan-Sharpening triplet (lrms_up, pan, gt).
+
+        Args:
+            img_path (str): Path to the input RGB image.
+
+        Returns:
+            tuple: A tuple containing:
+                - lrms_up (torch.Tensor): Low-resolution multi-spectral image, upsampled to original size.
+                - pan (torch.Tensor): Panchromatic band.
+                - gt (torch.Tensor): Ground truth high-resolution image.
+        """
         # Decode PNG to float32 [3, H, W] in [0, 1]
         gt = read_image(img_path, mode=ImageReadMode.RGB).to(torch.float32).div_(255.0)
 
@@ -120,7 +132,10 @@ class DIV2KPanDataset(Dataset):
         pan = self._make_pan(gt)
 
         # [N, 3, H, W] -> [N, 3, H//s, W//s] -> [N, 3, H, W] upsampled low-res MS
+
+        # [N, 3, H, W] -> [N, 3, H//s, W//s]
         lrms = F.avg_pool2d(gt, kernel_size=self.sampling, stride=self.sampling)
+        # Upsamples the low-res MS to original size using bicubic interpolation
         lrms_up = F.interpolate(
             lrms,
             size=(gt.shape[-2], gt.shape[-1]),
@@ -140,12 +155,14 @@ class DIV2KPanDataset(Dataset):
         gt_list = [r[2] for r in results]
 
         if self.patch_size is None:
+            # The leading 1 dimension to enumerate patches is not used, so we remove it
             return (
                 [x.squeeze(0) for x in lrms_list],
                 [x.squeeze(0) for x in pan_list],
                 [x.squeeze(0) for x in gt_list],
             )
 
+        # Concatenate all the patches into a single tensor, returns three of them (lrms_up, pan, gt)
         return (
             torch.cat(lrms_list, dim=0),
             torch.cat(pan_list, dim=0),

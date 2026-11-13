@@ -8,6 +8,8 @@ class ResBlock(nn.Module):
     Note: BatchNorm is deliberately omitted following EDSR (Lim et al., 2017) for
     Super-Resolution and Pan-Sharpening, which preserves radiometric/contrast fidelity,
     saves ~40% activation memory, and remains compatible with existing checkpoints.
+
+    
     """
 
     def __init__(self, in_channels: int, kernel_size: int = 3):
@@ -15,8 +17,13 @@ class ResBlock(nn.Module):
         padding = kernel_size // 2
 
         self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size, padding=padding)
+        # Overwrites relu for memory saving (inplace=False). Safe because nothing else uses
+        # the intermediate conv1(x) output.
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(in_channels, in_channels, kernel_size, padding=padding)
+        # Allocates a fresh ouput tensor. If an inplace=True operation overwrites a tensor's data
+        # while another part of the computation graph (or a hook) still needs the original values
+        # for .backward(), PyTorch throws a RuntimeError.
         self.act_out = nn.ReLU(inplace=False)
 
     def forward(self, x):
